@@ -16,7 +16,7 @@ interface Dream {
   themes: string[];
   emotions: string[];
   visual: any;
-  createdAt: string;
+  createdAt: Date;
 }
 
 export default function DreamJournalClient({
