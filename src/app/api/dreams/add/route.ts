@@ -1,45 +1,27 @@
-import { type NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { analyzeDreamWithAI } from "@/lib/dream-analysis-ai";
 import { encrypt, safeDecrypt, isEncrypted } from "@/lib/encryption";
 import { dreamAddLimiter, createRateLimitResponse } from "@/lib/rate-limit";
-import {
-  requestSecurity,
-  createSecurityErrorResponse,
-} from "@/lib/request-security";
 import calculatePatterns from "@/lib/calculate-pattern";
 
-export async function POST(request: NextRequest) {
+export async function POST(request: Request) {
   try {
     const rateLimitResult = dreamAddLimiter.check(request);
+
     if (!rateLimitResult.allowed) {
       return createRateLimitResponse(rateLimitResult.resetTime);
     }
 
     const session = await getServerSession(authOptions);
+
     if (!session?.user?.id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Parse request body to get CSRF token
-    const body = await request.json();
-    const { description, csrfToken } = body;
-
-    // Validate request security
-    const securityResult = requestSecurity.validateRequest(request, {
-      checkOrigin: true,
-      checkCustomHeader: true,
-      checkCSRF: true,
-      csrfToken,
-      sessionId: session.user.id,
-    });
-
-    if (!securityResult.valid) {
-      console.warn("Security validation failed:", securityResult.errors);
-      return createSecurityErrorResponse(securityResult.errors);
-    }
+    const { description } = await request.json();
 
     if (!description?.trim()) {
       return NextResponse.json(
@@ -50,21 +32,12 @@ export async function POST(request: NextRequest) {
 
     const cleanDescription = description.trim();
 
+    // Validate description length (prevent abuse)
     if (cleanDescription.length > 5000) {
       return NextResponse.json(
         {
           error: "Description too long",
           message: "Dream description must be less than 5000 characters",
-        },
-        { status: 400 },
-      );
-    }
-
-    if (cleanDescription.length < 10) {
-      return NextResponse.json(
-        {
-          error: "Description too short",
-          message: "Please provide a more detailed description of your dream",
         },
         { status: 400 },
       );
@@ -106,12 +79,12 @@ export async function POST(request: NextRequest) {
       "X-RateLimit-Reset",
       new Date(rateLimitResult.resetTime).toISOString(),
     );
-    response.headers.set("X-Security-Validated", "true");
 
     return response;
   } catch (error) {
     console.error("Error adding dream:", error);
 
+    // Check if it's an AI analysis error
     if (error instanceof Error && error.message.includes("AI analysis")) {
       return NextResponse.json(
         {

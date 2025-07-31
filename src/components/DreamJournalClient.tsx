@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { signOut } from "next-auth/react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -8,7 +8,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { LogOut, Plus, BarChart3, Eye, EyeOff, Trash2 } from "lucide-react";
 import { User } from "next-auth";
-import { clientSecurity } from "@/lib/client-security";
 
 interface Dream {
   id: string;
@@ -33,38 +32,16 @@ export default function DreamJournalClient({
   const [selectedDream, setSelectedDream] = useState<Dream | null>(null);
   const [showPatterns, setShowPatterns] = useState(false);
 
-  // Pre-warm security token on component mount
-  useEffect(() => {
-    clientSecurity.preWarmToken();
-  }, []);
-
-  const handleApiError = (response: Response, defaultMessage: string) => {
-    if (response.status === 429) {
-      const retryAfter = response.headers.get("Retry-After");
-      return `Too many requests. Please wait ${retryAfter} seconds before trying again.`;
-    } else if (response.status === 400) {
-      return "Please check your input and try again.";
-    } else if (response.status === 503) {
-      return "Service is temporarily unavailable. Please try again later.";
-    } else if (response.status === 404) {
-      return "Item not found or already removed.";
-    } else {
-      return defaultMessage;
-    }
-  };
-
   const submitDream = async () => {
     if (!newDream.trim() || isSubmitting) return;
 
     setIsSubmitting(true);
 
     try {
-      const response = await clientSecurity.secureFetch("/api/dreams/add", {
+      const response = await fetch("/api/dreams/add", {
         method: "POST",
-        body: JSON.stringify({
-          description: newDream,
-          csrfToken: await clientSecurity.getCSRFToken(),
-        }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ description: newDream }),
       });
 
       if (response.ok) {
@@ -72,40 +49,35 @@ export default function DreamJournalClient({
         setDreams(result.dreams);
         setPatterns(result.patterns);
         setNewDream("");
+      } else if (response.status === 429) {
+        // Rate limit exceeded
+        const errorData = await response.json();
+        const retryAfter = response.headers.get("Retry-After");
+        console.error(
+          "Rate limit exceeded. Retry after:",
+          retryAfter,
+          "seconds",
+        );
+        alert(
+          `Too many requests. Please wait ${retryAfter} seconds before trying again.`,
+        );
+      } else if (response.status === 400) {
+        const errorData = await response.json();
+        console.error("Validation error:", errorData.message);
+        alert(errorData.message || "Please check your input and try again.");
+      } else if (response.status === 503) {
+        const errorData = await response.json();
+        console.error("Service unavailable:", errorData.message);
+        alert(
+          "AI analysis is temporarily unavailable. Please try again later.",
+        );
       } else {
-        // Only show user-friendly errors, not security-related ones
-        if (response.status !== 403) {
-          const errorMessage = await response.json().then(
-            (data) =>
-              data.message ||
-              handleApiError(
-                response,
-                "Failed to add dream. Please try again.",
-              ),
-            () =>
-              handleApiError(
-                response,
-                "Failed to add dream. Please try again.",
-              ),
-          );
-          alert(errorMessage);
-        } else {
-          // For 403 errors, just show a generic message
-          alert("Unable to process request. Please try again.");
-        }
+        console.error("Failed to add dream");
+        alert("Failed to add dream. Please try again.");
       }
     } catch (error) {
       console.error("Failed to add dream:", error);
-      // Only show network errors, not security token errors
-      if (
-        error instanceof Error &&
-        !error.message.includes("CSRF") &&
-        !error.message.includes("token")
-      ) {
-        alert("Network error. Please check your connection and try again.");
-      } else {
-        alert("Unable to process request. Please try again.");
-      }
+      alert("Network error. Please check your connection and try again.");
     }
 
     setIsSubmitting(false);
@@ -113,12 +85,10 @@ export default function DreamJournalClient({
 
   const deleteDream = async (dreamId: string) => {
     try {
-      const response = await clientSecurity.secureFetch("/api/dreams/delete", {
+      const response = await fetch("/api/dreams/delete", {
         method: "POST",
-        body: JSON.stringify({
-          dreamId,
-          csrfToken: await clientSecurity.getCSRFToken(),
-        }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dreamId }),
       });
 
       if (response.ok) {
@@ -126,45 +96,31 @@ export default function DreamJournalClient({
         setDreams(result.dreams);
         setPatterns(result.patterns);
         setSelectedDream(null);
+      } else if (response.status === 429) {
+        // Rate limit exceeded
+        const errorData = await response.json();
+        const retryAfter = response.headers.get("Retry-After");
+        console.error(
+          "Rate limit exceeded. Retry after:",
+          retryAfter,
+          "seconds",
+        );
+        alert(
+          `Too many requests. Please wait ${retryAfter} seconds before trying again.`,
+        );
+      } else if (response.status === 404) {
+        const errorData = await response.json();
+        console.error("Dream not found:", errorData.message);
+        alert("Dream not found or already deleted.");
+        // Refresh the dreams list
+        window.location.reload();
       } else {
-        // Only show user-friendly errors, not security-related ones
-        if (response.status !== 403) {
-          const errorMessage = await response.json().then(
-            (data) =>
-              data.message ||
-              handleApiError(
-                response,
-                "Failed to delete dream. Please try again.",
-              ),
-            () =>
-              handleApiError(
-                response,
-                "Failed to delete dream. Please try again.",
-              ),
-          );
-          alert(errorMessage);
-
-          // If dream not found, refresh the page
-          if (response.status === 404) {
-            setTimeout(() => window.location.reload(), 2000);
-          }
-        } else {
-          // For 403 errors, just show a generic message
-          alert("Unable to process request. Please try again.");
-        }
+        console.error("Failed to delete dream");
+        alert("Failed to delete dream. Please try again.");
       }
     } catch (error) {
       console.error("Failed to delete dream:", error);
-      // Only show network errors, not security token errors
-      if (
-        error instanceof Error &&
-        !error.message.includes("CSRF") &&
-        !error.message.includes("token")
-      ) {
-        alert("Network error. Please check your connection and try again.");
-      } else {
-        alert("Unable to process request. Please try again.");
-      }
+      alert("Network error. Please check your connection and try again.");
     }
   };
 
@@ -515,10 +471,7 @@ export default function DreamJournalClient({
               </p>
             </div>
             <Button
-              onClick={() => {
-                clientSecurity.clearToken();
-                signOut();
-              }}
+              onClick={() => signOut()}
               variant="ghost"
               className="text-amber-700 hover:text-amber-900 hover:bg-amber-100/50 border border-amber-200 bg-white/60"
             >

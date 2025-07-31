@@ -1,44 +1,26 @@
-import { type NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { safeDecrypt, isEncrypted } from "@/lib/encryption";
 import { dreamDeleteLimiter, createRateLimitResponse } from "@/lib/rate-limit";
-import {
-  requestSecurity,
-  createSecurityErrorResponse,
-} from "@/lib/request-security";
 import calculatePatterns from "@/lib/calculate-pattern";
 
-export async function POST(request: NextRequest) {
+export async function POST(request: Request) {
   try {
     const rateLimitResult = dreamDeleteLimiter.check(request);
+
     if (!rateLimitResult.allowed) {
       return createRateLimitResponse(rateLimitResult.resetTime);
     }
 
     const session = await getServerSession(authOptions);
+
     if (!session?.user?.id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Parse request body to get CSRF token
-    const body = await request.json();
-    const { dreamId, csrfToken } = body;
-
-    // Validate request security
-    const securityResult = requestSecurity.validateRequest(request, {
-      checkOrigin: true,
-      checkCustomHeader: true,
-      checkCSRF: true,
-      csrfToken,
-      sessionId: session.user.id,
-    });
-
-    if (!securityResult.valid) {
-      console.warn("Security validation failed:", securityResult.errors);
-      return createSecurityErrorResponse(securityResult.errors);
-    }
+    const { dreamId } = await request.json();
 
     if (!dreamId) {
       return NextResponse.json(
@@ -103,7 +85,6 @@ export async function POST(request: NextRequest) {
       "X-RateLimit-Reset",
       new Date(rateLimitResult.resetTime).toISOString(),
     );
-    response.headers.set("X-Security-Validated", "true");
 
     return response;
   } catch (error) {
