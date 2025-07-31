@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { LogOut, Plus, BarChart3, Eye, EyeOff, Trash2 } from "lucide-react";
 import { User } from "next-auth";
+import { clientSecurity } from "@/lib/client-security";
 
 interface Dream {
   id: string;
@@ -17,13 +18,6 @@ interface Dream {
   visual: any;
   createdAt: Date;
 }
-
-// interface User {
-//   id: string;
-//   name?: string | null;
-//   email?: string | null;
-//   image?: string | null;
-// }
 
 export default function DreamJournalClient({
   initialData,
@@ -45,10 +39,12 @@ export default function DreamJournalClient({
     setIsSubmitting(true);
 
     try {
-      const response = await fetch("/api/dreams/add", {
+      const response = await clientSecurity.secureFetch("/api/dreams/add", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ description: newDream }),
+        body: JSON.stringify({
+          description: newDream,
+          csrfToken: await clientSecurity.getCSRFToken(),
+        }),
       });
 
       if (response.ok) {
@@ -56,11 +52,49 @@ export default function DreamJournalClient({
         setDreams(result.dreams);
         setPatterns(result.patterns);
         setNewDream("");
+      } else if (response.status === 429) {
+        // Rate limit exceeded
+        const errorData = await response.json();
+        const retryAfter = response.headers.get("Retry-After");
+        console.error(
+          "Rate limit exceeded. Retry after:",
+          retryAfter,
+          "seconds",
+        );
+        alert(
+          `Too many requests. Please wait ${retryAfter} seconds before trying again.`,
+        );
+      } else if (response.status === 403) {
+        // Security validation failed
+        const errorData = await response.json();
+        console.error("Security validation failed:", errorData.details);
+        alert(
+          "Security validation failed. Please refresh the page and try again.",
+        );
+        // Clear cached security token
+        clientSecurity.clearToken();
+      } else if (response.status === 400) {
+        const errorData = await response.json();
+        console.error("Validation error:", errorData.message);
+        alert(errorData.message || "Please check your input and try again.");
+      } else if (response.status === 503) {
+        const errorData = await response.json();
+        console.error("Service unavailable:", errorData.message);
+        alert(
+          "AI analysis is temporarily unavailable. Please try again later.",
+        );
       } else {
         console.error("Failed to add dream");
+        alert("Failed to add dream. Please try again.");
       }
     } catch (error) {
       console.error("Failed to add dream:", error);
+      if (error instanceof Error && error.message.includes("CSRF")) {
+        alert("Security token expired. Please refresh the page and try again.");
+        clientSecurity.clearToken();
+      } else {
+        alert("Network error. Please check your connection and try again.");
+      }
     }
 
     setIsSubmitting(false);
@@ -68,10 +102,12 @@ export default function DreamJournalClient({
 
   const deleteDream = async (dreamId: string) => {
     try {
-      const response = await fetch("/api/dreams/delete", {
+      const response = await clientSecurity.secureFetch("/api/dreams/delete", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dreamId }),
+        body: JSON.stringify({
+          dreamId,
+          csrfToken: await clientSecurity.getCSRFToken(),
+        }),
       });
 
       if (response.ok) {
@@ -79,9 +115,44 @@ export default function DreamJournalClient({
         setDreams(result.dreams);
         setPatterns(result.patterns);
         setSelectedDream(null);
+      } else if (response.status === 429) {
+        // Rate limit exceeded
+        const errorData = await response.json();
+        const retryAfter = response.headers.get("Retry-After");
+        console.error(
+          "Rate limit exceeded. Retry after:",
+          retryAfter,
+          "seconds",
+        );
+        alert(
+          `Too many requests. Please wait ${retryAfter} seconds before trying again.`,
+        );
+      } else if (response.status === 403) {
+        // Security validation failed
+        const errorData = await response.json();
+        console.error("Security validation failed:", errorData.details);
+        alert(
+          "Security validation failed. Please refresh the page and try again.",
+        );
+        clientSecurity.clearToken();
+      } else if (response.status === 404) {
+        const errorData = await response.json();
+        console.error("Dream not found:", errorData.message);
+        alert("Dream not found or already deleted.");
+        // Refresh the dreams list
+        window.location.reload();
+      } else {
+        console.error("Failed to delete dream");
+        alert("Failed to delete dream. Please try again.");
       }
     } catch (error) {
       console.error("Failed to delete dream:", error);
+      if (error instanceof Error && error.message.includes("CSRF")) {
+        alert("Security token expired. Please refresh the page and try again.");
+        clientSecurity.clearToken();
+      } else {
+        alert("Network error. Please check your connection and try again.");
+      }
     }
   };
 
