@@ -29,15 +29,6 @@ export async function POST(request: Request) {
       );
     }
 
-    const uuidRegex =
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    if (!uuidRegex.test(dreamId)) {
-      return NextResponse.json(
-        { error: "Invalid dream ID format" },
-        { status: 400 },
-      );
-    }
-
     const existingDream = await prisma.dream.findFirst({
       where: {
         id: dreamId,
